@@ -33,7 +33,7 @@ DEFAULT_CONFIG = {
     "quality": "2high",
     "output_dir": str(OUTPUT_DIR),
     "save_comments": True,
-    "embed_subtitles": False,
+    "embed_subtitles": True,
 }
 
 API_BASE  = "https://api.whowatch.tv"
@@ -372,11 +372,15 @@ async def collect_comments(live_id: str, comment_file: Path, stop_event: asyncio
                                 fp.write(line + "\n")
                                 fp.flush()
                                 push_log(f"💬 [{user}] {display}", "comment")
+                                # 匿名ユーザーはcomment.idで区別できないので
+                                # user_nameとuser_pathの組み合わせをキーにする
                                 sio.emit("comment", {
                                     "time": ts, "user": user, "text": display,
                                     "live_id": live_id,
                                     "user_id": user_obj.get("id", ""),
                                     "user_path": user_obj.get("user_path", ""),
+                                    "comment_id": str(comment_obj.get("id", "")),
+                                    "streamer": user_path,
                                 })
                     except (json.JSONDecodeError, ValueError):
                         pass
@@ -426,10 +430,21 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
 
     ffmpeg = "ffmpeg"
     if sys.platform == "win32":
-        # ffmpeg.exe が同じフォルダにあれば優先
+        # 1. 同じフォルダのffmpeg.exeを優先
         local_ff = BASE_DIR / "ffmpeg.exe"
         if local_ff.exists():
             ffmpeg = str(local_ff)
+        else:
+            # 2. Cドライブ直下、Downloadsなど一般的な場所を探す
+            for candidate in [
+                Path("C:/ffmpeg/bin/ffmpeg.exe"),
+                Path("C:/ffmpeg/ffmpeg.exe"),
+                Path.home() / "Downloads" / "ffmpeg.exe",
+                Path.home() / "ffmpeg" / "ffmpeg.exe",
+            ]:
+                if candidate.exists():
+                    ffmpeg = str(candidate)
+                    break
 
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning",
            "-i", play_url, "-c", "copy", "-f", "mpegts", str(video_file)]
@@ -464,11 +479,59 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
 
     push_log(f"■ 録画終了: {user_path}", "stop")
 
+    # コメントtxtにリスナー別アイテム集計を追記
+    _append_item_summary(comment_file)
+
     # コメントをSRTに変換して動画に埋め込む（オプション）
     if cfg.get("embed_subtitles", False):
         _embed_subtitles(video_file, comment_file, ffmpeg)
 
     push_status()
+
+
+def _append_item_summary(comment_file: Path):
+    """コメントtxtからアイテム集計を生成して末尾に追記する。"""
+    import re as _re
+    item_stats: dict = {}
+    try:
+        lines = comment_file.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            if "🎁" not in line:
+                continue
+            # 行形式: [HH:MM:SS] ユーザー名: テキスト 🎁アイテム名×個数
+            parts = line.split("] ", 1)
+            if len(parts) < 2:
+                continue
+            rest = parts[1]
+            user_text = rest.split(": ", 1)
+            if len(user_text) < 2:
+                continue
+            user = user_text[0]
+            text = user_text[1]
+            # 🎁以降を取得
+            gift_idx = text.find("🎁")
+            if gift_idx < 0:
+                continue
+            gift_part = text[gift_idx+1:]
+            # "アイテム名×N" 形式を解析
+            for m in _re.finditer(r"([^\s×,🎁]+)(?:×(\d+))?", gift_part):
+                iname = m.group(1).strip()
+                icount = int(m.group(2)) if m.group(2) else 1
+                if not iname:
+                    continue
+                if user not in item_stats:
+                    item_stats[user] = {}
+                item_stats[user][iname] = item_stats[user].get(iname, 0) + icount
+        if item_stats:
+            with open(comment_file, "a", encoding="utf-8") as f:
+                f.write("\n# -- アイテム集計 --\n")
+                for user, items in sorted(item_stats.items(),
+                                          key=lambda x: sum(x[1].values()), reverse=True):
+                    total = sum(items.values())
+                    detail = "  ".join(f"{k}x{v}" for k, v in items.items())
+                    f.write(f"# {user}: {detail}  (合計{total}個)\n")
+    except Exception as e:
+        pass  # 集計失敗は無視
 
 
 def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str):
@@ -511,6 +574,8 @@ def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str):
         # 中間ファイルのSRTを削除
         srt_file.unlink(missing_ok=True)
         push_log(f"字幕埋め込み完了: {out_file.name}", "info")
+        # TSファイルを削除
+        video_file.unlink(missing_ok=True)
     except Exception as e:
         push_log(f"字幕埋め込みエラー: {e}", "warn")
 

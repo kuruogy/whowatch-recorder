@@ -58,7 +58,7 @@ main{padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:11px}
 .rec-view{padding:4px 10px;border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:10px}
 .rec-view:hover{background:var(--accent);color:#fff}
 .empty{color:var(--muted);font-size:11px;text-align:center;padding:14px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.grid2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px}
 .log-wrap{height:190px;overflow-y:auto;font-family:'Cascadia Code','Consolas',monospace;font-size:11px;background:var(--surface);border-radius:7px;padding:7px;line-height:1.65}
 .log-wrap::-webkit-scrollbar,.comment-wrap::-webkit-scrollbar{width:3px}
 .log-wrap::-webkit-scrollbar-thumb,.comment-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
@@ -161,7 +161,21 @@ input:checked+.slider:before{transform:translateX(17px)}
     </div>
     <div class="card">
       <div class="card-title" style="justify-content:space-between">💬 コメント
-        <button onclick="clearComments()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px">クリア</button>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button onclick="toggleNgPanel()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px">🚫 NG</button>
+          <button onclick="clearComments()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px">クリア</button>
+        </div>
+      </div>
+      <!-- NGワードパネル -->
+      <div id="ngPanel" style="display:none;margin-bottom:8px;padding:8px;background:var(--surface);border-radius:6px;border:1px solid var(--red)">
+        <div style="font-size:10px;color:var(--red);margin-bottom:4px">🚫 NGワード（コメントを非表示・ログに記録）</div>
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          <input id="ngInput" type="text" placeholder="NGワードを入力..."
+            style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--text);font-size:11px;outline:none"
+            onkeydown="if(event.key==='Enter')addNgWord()">
+          <button onclick="addNgWord()" style="background:var(--red);border:none;border-radius:5px;color:#fff;padding:4px 10px;cursor:pointer;font-size:11px">追加</button>
+        </div>
+        <div id="ngList" style="display:flex;gap:4px;flex-wrap:wrap"></div>
       </div>
       <div class="cmt-tabs" id="cmt-tabs">
         <button class="tab-btn active" data-lid="all" onclick="switchTab(this,'all')">全配信</button>
@@ -169,6 +183,55 @@ input:checked+.slider:before{transform:translateX(17px)}
       <div class="comment-wrap" id="commentWrap">
         <div class="empty">コメント待機中...</div>
       </div>
+    </div>
+
+    <!-- リスナー別 -->
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        👤 リスナー別
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="listenerSort" onchange="sortListenerTabs()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:2px 6px;font-size:10px">
+            <option value="recent">最新順</option>
+            <option value="count">コメント数順</option>
+            <option value="item">アイテム数順</option>
+          </select>
+          <button onclick="clearListeners()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px">クリア</button>
+        </div>
+      </div>
+      <!-- コメント検索 -->
+      <div style="display:flex;gap:4px;margin-bottom:6px">
+        <input id="cmtSearch" type="text" placeholder="🔍 コメント検索..." oninput="searchComments()"
+          style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--text);font-size:11px;outline:none">
+        <button onclick="showItemSummary()" title="アイテム集計"
+          style="background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--yellow);cursor:pointer;font-size:11px">🎁集計</button>
+      </div>
+      <div id="listener-tabs" style="display:flex;gap:4px;flex-wrap:wrap;max-height:58px;overflow-y:auto;padding-bottom:6px;border-bottom:1px solid var(--border);margin-bottom:6px">
+        <span style="color:var(--muted);font-size:10px">コメント待機中...</span>
+      </div>
+      <div class="comment-wrap" id="listenerWrap">
+        <div class="empty">リスナーを選択してください</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- アイテム集計 -->
+  <div class="card" id="itemSummaryCard" style="display:none">
+    <div class="card-title" style="justify-content:space-between">
+      🎁 アイテム集計（全リスナー）
+      <button onclick="document.getElementById('itemSummaryCard').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px">閉じる</button>
+    </div>
+    <div id="itemSummaryWrap" style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead>
+          <tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:4px 8px">リスナー</th>
+            <th style="text-align:left;padding:4px 8px">配信者</th>
+            <th style="text-align:left;padding:4px 8px">アイテム</th>
+            <th style="text-align:right;padding:4px 8px">合計数</th>
+          </tr>
+        </thead>
+        <tbody id="itemSummaryBody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -239,6 +302,8 @@ input:checked+.slider:before{transform:translateX(17px)}
 <script>
 const socket = io();
 let commentCount = 0, firstComment = true;
+const listenerData = {}; // ukey -> {name, path, comments:[{time,text,live_id}], items:{name->count}}
+let activeListener = null;
 const allComments = {};
 let activeLid = 'all';
 
@@ -255,6 +320,42 @@ socket.on('comment', c => {
   if (firstComment) { document.getElementById('commentWrap').innerHTML=''; firstComment=false; }
   commentCount++;
   document.getElementById('statComments').textContent = commentCount;
+
+  // NGワードチェック
+  if (isNgComment(c.text)) {
+    // NGコメントは表示しない（ログには記録済み）
+    const ukey2 = c.user_path ? `${c.user_path}__${c.user}` : c.user;
+    if (!listenerData[ukey2]) {
+      listenerData[ukey2] = {name:c.user, path:c.user_path||'', comments:[], items:{}};
+      addListenerTab(ukey2);
+    }
+    listenerData[ukey2].comments.push({time:c.time, text:`🚫[NG] ${c.text}`, live_id:String(c.live_id||'')});
+    updateListenerTab(ukey2);
+    return;
+  }
+
+  // リスナーデータ更新（user_idで一意に識別、匿名ユーザー対策）
+  // user_path + user名でリスナーを一意に識別（匿名ユーザー対策）
+  const ukey = c.user_path ? `${c.user_path}__${c.user}` : c.user;
+  if (!listenerData[ukey]) {
+    listenerData[ukey] = {name:c.user, path:c.user_path||'', streamer:c.streamer||'', comments:[], items:{}};
+    addListenerTab(ukey);
+  }
+  listenerData[ukey].comments.push({time:c.time, text:c.text, live_id:String(c.live_id||'')});
+  // アイテム集計（🎁アイテム名×個数 形式を解析）
+  if (c.text && c.text.includes('🎁')) {
+    const itemRegex = /🎁([^🎁×\s][^🎁×]*)(?:×(\d+))?/g;
+    let im;
+    while ((im = itemRegex.exec(c.text)) !== null) {
+      const iname = im[1].trim();
+      const icount = im[2] ? parseInt(im[2]) : 1;
+      if (iname) {
+        listenerData[ukey].items[iname] = (listenerData[ukey].items[iname]||0) + icount;
+      }
+    }
+  }
+  updateListenerTab(ukey);
+  if (activeListener === ukey) appendListenerCmt({time:c.time, text:c.text});
   const lid = String(c.live_id || 'unknown');
   if (!allComments[lid]) { allComments[lid]=[]; addTab(lid); }
   allComments[lid].push(c);
@@ -438,6 +539,196 @@ function appendLog(e){
   if(wrap.children.length>300)wrap.removeChild(wrap.firstChild);
 }
 function clearLog(){document.getElementById('logWrap').innerHTML='';}
+
+// ── リスナー管理 ──
+function addListenerTab(ukey) {
+  const tabs = document.getElementById('listener-tabs');
+  const empty = tabs.querySelector('span');
+  if (empty) empty.remove();
+  if (tabs.querySelector(`[data-ukey="${ukey}"]`)) return;
+  const btn = document.createElement('button');
+  btn.className = 'tab-btn';
+  btn.dataset.ukey = ukey;
+  btn.onclick = () => switchListenerTab(btn, ukey);
+  updateListenerTabLabel(btn, ukey);
+  tabs.appendChild(btn);
+}
+function updateListenerTab(ukey) {
+  const btn = document.querySelector(`[data-ukey="${ukey}"]`);
+  if (btn) updateListenerTabLabel(btn, ukey);
+}
+function updateListenerTabLabel(btn, ukey) {
+  const d = listenerData[ukey];
+  const itemCount = Object.values(d.items).reduce((a,b)=>a+b, 0);
+  const itemStr = itemCount > 0 ? ` 🎁${itemCount}` : '';
+  const streamerStr = d.streamer ? ` [${d.streamer}]` : '';
+  btn.textContent = `${d.name}${streamerStr} ${d.comments.length}件${itemStr}`;
+}
+function switchListenerTab(btn, ukey) {
+  document.querySelectorAll('#listener-tabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  activeListener = ukey;
+  const wrap = document.getElementById('listenerWrap');
+  wrap.innerHTML = '';
+  const d = listenerData[ukey];
+  // 配信者名とアイテム集計を表示
+  const meta = document.createElement('div');
+  meta.style.cssText = 'background:var(--surface);border-radius:5px;padding:4px 8px;margin-bottom:4px;font-size:10px';
+  let metaText = '';
+  if (d.streamer) metaText += `<span style="color:var(--muted)">配信: ${esc(d.streamer)}</span>  `;
+  if (Object.keys(d.items).length > 0) {
+    metaText += `<span style="color:var(--yellow)">🎁 ${Object.entries(d.items).map(([k,v])=>`${k}×${v}`).join('  ')}</span>`;
+  }
+  if (metaText) { meta.innerHTML = metaText; wrap.appendChild(meta); }
+  d.comments.forEach(c => appendListenerCmt(c));
+}
+function appendListenerCmt(c) {
+  const wrap = document.getElementById('listenerWrap');
+  const el = document.createElement('div');
+  el.className = 'cmt-item';
+  el.innerHTML = `<span class="cmt-time">${c.time}</span><span class="cmt-text">${esc(c.text)}</span>`;
+  wrap.appendChild(el);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+function sortListenerTabs() {
+  const sort = document.getElementById('listenerSort').value;
+  const tabs = document.getElementById('listener-tabs');
+  const btns = Array.from(tabs.querySelectorAll('.tab-btn'));
+  btns.sort((a,b) => {
+    const da = listenerData[a.dataset.ukey];
+    const db = listenerData[b.dataset.ukey];
+    if (sort === 'count') return db.comments.length - da.comments.length;
+    if (sort === 'item') {
+      const ai = Object.values(da.items).reduce((x,y)=>x+y,0);
+      const bi = Object.values(db.items).reduce((x,y)=>x+y,0);
+      return bi - ai;
+    }
+    const at = da.comments[da.comments.length-1]?.time||'';
+    const bt = db.comments[db.comments.length-1]?.time||'';
+    return bt.localeCompare(at);
+  });
+  btns.forEach(b => tabs.appendChild(b));
+}
+// ── コメント検索 ──
+function searchComments() {
+  const q = document.getElementById('cmtSearch').value.trim().toLowerCase();
+  const wrap = document.getElementById('listenerWrap');
+  // アクティブなリスナーのコメントを検索
+  if (!activeListener) {
+    // 全コメントから検索
+    const allCmts = Object.values(listenerData).flatMap(d =>
+      d.comments.map(c => ({...c, user: d.name}))
+    ).sort((a,b) => a.time.localeCompare(b.time));
+    wrap.innerHTML = '';
+    allCmts.filter(c => !q || c.text.toLowerCase().includes(q) || c.user.toLowerCase().includes(q))
+      .forEach(c => {
+        const el = document.createElement('div');
+        el.className = 'cmt-item';
+        const text = q ? c.text.replace(new RegExp(q,'gi'), m=>`<mark style="background:var(--yellow);color:#000">${m}</mark>`) : esc(c.text);
+        el.innerHTML = `<span class="cmt-time">${c.time}</span><span class="cmt-user normal" style="font-size:10px">${esc(c.user)}</span><span class="cmt-text">${text}</span>`;
+        wrap.appendChild(el);
+      });
+    return;
+  }
+  const d = listenerData[activeListener];
+  if (!d) return;
+  wrap.innerHTML = '';
+  // 配信者名とアイテム集計を表示
+  const meta = document.createElement('div');
+  meta.style.cssText = 'background:var(--surface);border-radius:5px;padding:4px 8px;margin-bottom:4px;font-size:10px';
+  let metaText = '';
+  if (d.streamer) metaText += `<span style="color:var(--muted)">配信: ${esc(d.streamer)}</span>  `;
+  if (Object.keys(d.items).length > 0) {
+    metaText += `<span style="color:var(--yellow)">🎁 ${Object.entries(d.items).map(([k,v])=>`${k}×${v}`).join('  ')}</span>`;
+  }
+  if (metaText) { meta.innerHTML = metaText; wrap.appendChild(meta); }
+  d.comments.filter(c => !q || c.text.toLowerCase().includes(q))
+    .forEach(c => {
+      const el = document.createElement('div');
+      el.className = 'cmt-item';
+      const text = q ? c.text.replace(new RegExp(q,'gi'), m=>`<mark style="background:var(--yellow);color:#000">${m}</mark>`) : esc(c.text);
+      el.innerHTML = `<span class="cmt-time">${c.time}</span><span class="cmt-text">${text}</span>`;
+      wrap.appendChild(el);
+    });
+}
+
+// ── アイテム集計 ──
+function showItemSummary() {
+  const card = document.getElementById('itemSummaryCard');
+  const tbody = document.getElementById('itemSummaryBody');
+  tbody.innerHTML = '';
+  // リスナーごとにアイテム集計
+  const rows = Object.entries(listenerData)
+    .filter(([,d]) => Object.keys(d.items).length > 0)
+    .sort((a,b) => {
+      const ai = Object.values(a[1].items).reduce((x,y)=>x+y,0);
+      const bi = Object.values(b[1].items).reduce((x,y)=>x+y,0);
+      return bi - ai;
+    });
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="padding:8px;color:var(--muted);text-align:center">アイテムなし</td></tr>';
+  } else {
+    rows.forEach(([,d]) => {
+      const total = Object.values(d.items).reduce((x,y)=>x+y,0);
+      const itemStr = Object.entries(d.items).map(([k,v])=>`${k}×${v}`).join('  ');
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid var(--border)';
+      tr.innerHTML = `<td style="padding:4px 8px;color:var(--accent)">${esc(d.name)}</td>
+        <td style="padding:4px 8px;color:var(--muted);font-size:10px">${esc(d.streamer||'')}</td>
+        <td style="padding:4px 8px;color:var(--yellow)">🎁 ${esc(itemStr)}</td>
+        <td style="padding:4px 8px;text-align:right">${total}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+  card.style.display = card.style.display === 'none' ? 'block' : 'none';
+}
+
+// ── NGワード ──
+let ngWords = JSON.parse(localStorage.getItem('ngWords')||'[]');
+
+function toggleNgPanel() {
+  const p = document.getElementById('ngPanel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  renderNgList();
+}
+
+function renderNgList() {
+  const el = document.getElementById('ngList');
+  el.innerHTML = ngWords.map((w,i) =>
+    `<span style="background:var(--card);border:1px solid var(--red);border-radius:4px;padding:2px 6px;font-size:10px;color:var(--red);display:inline-flex;align-items:center;gap:4px">
+      ${esc(w)}<button onclick="removeNgWord(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;padding:0">✕</button>
+    </span>`
+  ).join('');
+}
+
+function addNgWord() {
+  const input = document.getElementById('ngInput');
+  const w = input.value.trim();
+  if (!w || ngWords.includes(w)) return;
+  ngWords.push(w);
+  localStorage.setItem('ngWords', JSON.stringify(ngWords));
+  input.value = '';
+  renderNgList();
+}
+
+function removeNgWord(i) {
+  ngWords.splice(i, 1);
+  localStorage.setItem('ngWords', JSON.stringify(ngWords));
+  renderNgList();
+}
+
+function isNgComment(text) {
+  return ngWords.some(w => text.toLowerCase().includes(w.toLowerCase()));
+}
+
+function clearListeners() {
+  Object.keys(listenerData).forEach(k=>delete listenerData[k]);
+  activeListener = null;
+  const tabs = document.getElementById('listener-tabs');
+  tabs.innerHTML = '<span style="color:var(--muted);font-size:10px">コメント待機中...</span>';
+  document.getElementById('listenerWrap').innerHTML = '<div class="empty">リスナーを選択してください</div>';
+}
+
 function clearComments(){
   document.getElementById('commentWrap').innerHTML='<div class="empty">コメント待機中...</div>';
   firstComment=true;commentCount=0;document.getElementById('statComments').textContent=0;
