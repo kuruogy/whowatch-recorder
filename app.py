@@ -543,6 +543,17 @@ def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str):
         lines = comment_file.read_text(encoding="utf-8").splitlines()
         srt_lines = []
         idx = 1
+
+        # 録画開始時刻をtxtの1行目から取得
+        # 形式: # 配信開始: 2026-05-21T15:48:27.316798
+        rec_start_ms = None
+        for line in lines:
+            ms = _re.match(r"# 配信開始: \d{4}-\d{2}-\d{2}T(\d{2}):(\d{2}):(\d{2})", line)
+            if ms:
+                h0, m0, s0 = int(ms.group(1)), int(ms.group(2)), int(ms.group(3))
+                rec_start_ms = (h0 * 3600 + m0 * 60 + s0) * 1000
+                break
+
         for line in lines:
             m = _re.match(r"\[(\d{2}:\d{2}:\d{2})\] (.+?):\s*(.*)", line)
             if not m:
@@ -551,8 +562,15 @@ def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str):
             if not text:
                 continue
             h, mn, s = map(int, t_str.split(":"))
-            start_ms = (h * 3600 + mn * 60 + s) * 1000
-            end_ms   = start_ms + 3000
+            abs_ms = (h * 3600 + mn * 60 + s) * 1000
+            # 録画開始時刻からの相対時間に変換
+            if rec_start_ms is not None:
+                start_ms = abs_ms - rec_start_ms
+                if start_ms < 0:
+                    start_ms += 86400 * 1000  # 日をまたいだ場合
+            else:
+                start_ms = abs_ms
+            end_ms = start_ms + 3000
             def ms_to_srt(ms):
                 hh = ms // 3600000; ms %= 3600000
                 mm = ms // 60000;   ms %= 60000
