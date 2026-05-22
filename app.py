@@ -281,7 +281,8 @@ def get_live_id_and_url_via_streamlink(user_path: str, quality: str = "best") ->
 # ─── コメント収集 ────────────────────────────────────────
 
 async def collect_comments(live_id: str, comment_file: Path, stop_event: asyncio.Event,
-                            jwt: str = "", ws_url_base: str = "wss://ws.whowatch.tv/socket"):
+                            jwt: str = "", ws_url_base: str = "wss://ws.whowatch.tv/socket",
+                            streamer: str = ""):
     """
     Phoenix Channels プロトコルでコメントを取得する。
     メッセージ形式: [join_ref, ref, topic, event, payload]
@@ -380,7 +381,7 @@ async def collect_comments(live_id: str, comment_file: Path, stop_event: asyncio
                                     "user_id": user_obj.get("id", ""),
                                     "user_path": user_obj.get("user_path", ""),
                                     "comment_id": str(comment_obj.get("id", "")),
-                                    "streamer": user_path,
+                                    "streamer": streamer,
                                 })
                     except (json.JSONDecodeError, ValueError):
                         pass
@@ -466,7 +467,7 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(collect_comments(live_id, comment_file, stop_ev, jwt, ws_url))
+                loop.run_until_complete(collect_comments(live_id, comment_file, stop_ev, jwt, ws_url, user_path))
             finally:
                 loop.close()
         threading.Thread(target=run_ws, daemon=True).start()
@@ -482,11 +483,83 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
     # コメントtxtにリスナー別アイテム集計を追記
     _append_item_summary(comment_file)
 
-    # コメントをSRTに変換して動画に埋め込む（オプション）
+    # コメントをSRTに変換して動画に埋め込む（字幕埋め込みが先）
     if cfg.get("embed_subtitles", False):
         _embed_subtitles(video_file, comment_file, ffmpeg)
 
+    # MEGAへアップロード（字幕埋め込み後に実行）
+    if cfg.get("mega_upload", False):
+        mfolder = cfg.get("mega_folder", "/whowatch")
+        # txtをアップロード
+        _upload_to_mega(comment_file, mfolder)
+        # MP4をアップロード
+        sub_file = video_file.with_stem(video_file.stem + "_sub").with_suffix(".mp4")
+        if sub_file.exists():
+            _upload_to_mega(sub_file, mfolder)
+        elif video_file.exists():
+            _upload_to_mega(video_file, mfolder)
+
     push_status()
+
+
+def _get_mega_cmd(cmd_name: str = "mega-put") -> str:
+    """MEGAcmdのパスを返す。見つからない場合はコマンド名をそのまま返す。"""
+    import os as _os
+    localappdata = _os.environ.get("LOCALAPPDATA", "")
+    username = _os.environ.get("USERNAME", "")
+    candidates = [
+        Path(localappdata) / "MEGAcmd" / f"{cmd_name}.bat",
+        Path(localappdata) / "MEGAcmd" / f"{cmd_name}.exe",
+        Path(f"C:/Users/{username}/AppData/Local/MEGAcmd") / f"{cmd_name}.bat",
+        Path(f"C:/Users/{username}/AppData/Local/MEGAcmd") / f"{cmd_name}.exe",
+        Path("C:/Program Files/MEGAcmd") / f"{cmd_name}.bat",
+        Path("C:/Program Files/MEGAcmd") / f"{cmd_name}.exe",
+    ]
+    for c in candidates:
+        if c.exists():
+            push_log(f"MEGAcmd発見: {c}", "info")
+            return str(c)
+    # PATHから探す
+    push_log(f"MEGAcmd({cmd_name})をPATHから使用", "info")
+    return cmd_name
+
+
+def _upload_to_mega(file_path: Path, mega_folder: str = "/whowatch"):
+    """MEGAcmdを使ってファイルをアップロードする。"""
+    import subprocess as _sp
+    try:
+        mega_put   = _get_mega_cmd("mega-put")
+        mega_mkdir = _get_mega_cmd("mega-mkdir")
+
+        if not mega_put:
+            push_log("mega-putが見つかりません", "warn")
+            return
+
+        # フォルダパスを正規化（空の場合はデフォルト）
+        if not mega_folder or mega_folder.strip() == "":
+            mega_folder = "/whowatch"
+        folder = "/" + mega_folder.strip("/")
+        push_log(f"MEGAフォルダ: {folder}", "info")
+
+        # フォルダを作成
+        _sp.run([mega_mkdir, "-p", folder],
+                capture_output=True, text=True, timeout=30)
+
+        push_log(f"MEGAアップロード開始: {file_path.name}", "info")
+
+        # mega-put ローカルパス リモートフォルダパス
+        # フォルダの末尾に / をつけることでフォルダ内に入れる
+        result = _sp.run(
+            [mega_put, str(file_path), folder + "/"],
+            capture_output=True, text=True, timeout=7200
+        )
+        out = (result.stdout + result.stderr).strip()
+        if result.returncode == 0 or "100.00 %" in out:
+            push_log(f"MEGAアップロード完了: {file_path.name}", "info")
+        else:
+            push_log(f"MEGAアップロード失敗: {out[:150]}", "warn")
+    except Exception as e:
+        push_log(f"MEGAアップロードエラー: {e}", "warn")
 
 
 def _append_item_summary(comment_file: Path):
@@ -757,6 +830,14 @@ def api_config_save():
         cfg["output_dir"] = data["output_dir"]
     if "embed_subtitles" in data:
         cfg["embed_subtitles"] = bool(data["embed_subtitles"])
+    if "whowatch_cookie" in data:
+        cfg["whowatch_cookie"] = str(data["whowatch_cookie"])
+    if "whowatch_device_id" in data:
+        cfg["whowatch_device_id"] = str(data["whowatch_device_id"])
+    if "mega_upload" in data:
+        cfg["mega_upload"] = bool(data["mega_upload"])
+    if "mega_folder" in data:
+        cfg["mega_folder"] = str(data["mega_folder"])
     save_config(cfg)
     push_log(f"設定を保存しました (字幕埋め込み={'ON' if cfg.get('embed_subtitles') else 'OFF'})", "info")
     push_status()
