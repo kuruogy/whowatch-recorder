@@ -460,14 +460,34 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
         }
     push_status()
 
-    # コメント収集
+    # コメント収集（自動再接続ループ付き）
     stop_ev = asyncio.Event()
     if cfg.get("save_comments", True):
         def run_ws():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(collect_comments(live_id, comment_file, stop_ev, jwt, ws_url, user_path))
+                while not stop_ev.is_set():
+                    try:
+                        # JWTを再取得してから再接続
+                        current_jwt = jwt
+                        current_ws  = ws_url
+                        try:
+                            fresh = get_live_data(live_id)
+                            if fresh.get("jwt"):
+                                current_jwt = fresh["jwt"]
+                            if fresh.get("ws_url"):
+                                current_ws  = fresh["ws_url"]
+                        except Exception:
+                            pass
+                        loop.run_until_complete(
+                            collect_comments(live_id, comment_file, stop_ev, current_jwt, current_ws, user_path)
+                        )
+                    except Exception as e:
+                        push_log(f"コメントWS再接続エラー: {e}", "warn")
+                    if not stop_ev.is_set():
+                        push_log("コメントWS 5秒後に再接続...", "info")
+                        time.sleep(5)
             finally:
                 loop.close()
         threading.Thread(target=run_ws, daemon=True).start()
