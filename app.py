@@ -423,6 +423,12 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
     t = safe_name(title) if title else ""
     dt = now_str()
     stem = f"{u}_{t}_{dt}" if t else f"{u}_{dt}"
+
+    # 保存先: 出力フォルダ/配信者名/年月(202605)/
+    year_month = datetime.datetime.now().strftime("%Y%m")
+    out = Path(cfg["output_dir"]) / u / year_month
+    out.mkdir(parents=True, exist_ok=True)
+
     base = out / stem
     video_file   = base.with_suffix(".ts")
     comment_file = base.with_suffix(".txt")
