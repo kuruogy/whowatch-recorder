@@ -455,15 +455,31 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
 
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning",
            "-i", play_url, "-c", "copy", "-f", "mpegts", str(video_file)]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
+    # ffmpeg起動前に仮登録（2重起動防止）
     with _lock:
         recording_sessions[user_path] = {
             "live_id":    live_id,
-            "proc":       proc,
+            "proc":       None,
             "start_time": now_str("%H:%M:%S"),
             "video_file": str(video_file),
         }
+    push_status()
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+    # ffmpegが正常に起動したか確認（2秒待つ）
+    import time as _time2
+    _time2.sleep(2)
+    if proc.poll() is not None:
+        err_out = proc.stderr.read().decode("utf-8", errors="replace")[:300]
+        push_log(f"ffmpeg起動失敗: {user_path} err={err_out}", "warn")
+        with _lock:
+            recording_sessions.pop(user_path, None)
+        push_status()
+        return
+
+    with _lock:
+        recording_sessions[user_path]["proc"] = proc
     push_status()
 
     # コメント収集（自動再接続ループ付き）
