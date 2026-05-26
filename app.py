@@ -369,7 +369,10 @@ async def collect_comments(live_id: str, comment_file: Path, stop_event: asyncio
 
                             if text or item_info:
                                 display = (text + item_info).strip() if text else f"🎁{item_name}をプレゼント" + (f"×{item_count}" if item_count and item_count != 1 else "")
-                                line = f"[{ts}] {user}: {display}"
+                                uid = user_obj.get("id", "")
+                                upath = user_obj.get("user_path", "")
+                                # フォーマット: [時刻] ユーザー名(ID|user_path): テキスト
+                                line = f"[{ts}] {user}({uid}|{upath}): {display}"
                                 fp.write(line + "\n")
                                 fp.flush()
                                 push_log(f"💬 [{user}] {display}", "comment")
