@@ -143,6 +143,8 @@ input:checked+.slider:before{transform:translateX(17px)}
     <div class="stat-box"><div class="stat-num" id="statStreamers">0</div><div class="stat-label">登録配信者</div></div>
     <div class="stat-box"><div class="stat-num" id="statRecording" style="color:var(--red)">0</div><div class="stat-label">録画中</div></div>
     <div class="stat-box"><div class="stat-num" id="statComments" style="color:#93c5fd">0</div><div class="stat-label">受信コメント</div></div>
+    <div class="stat-box"><div class="stat-num" id="statListenersCurrent" style="color:var(--green)">0</div><div class="stat-label">現在の視聴者</div></div>
+    <div class="stat-box"><div class="stat-num" id="statListenersTotal" style="color:var(--yellow)">0</div><div class="stat-label">累計視聴者</div></div>
   </div>
 
   <!-- 録画中 -->
@@ -273,6 +275,17 @@ input:checked+.slider:before{transform:translateX(17px)}
           <span id="cfgEmbedSubLabel">OFF</span>
         </div>
       </div>
+      <div class="form-group">
+        <label>MEGAへ自動アップロード</label>
+        <div class="toggle-row">
+          <label class="toggle"><input type="checkbox" id="cfgMegaUpload"><span class="slider"></span></label>
+          <span id="cfgMegaUploadLabel">OFF</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>MEGAフォルダ</label>
+        <input type="text" id="cfgMegaFolder" placeholder="/whowatch" value="/whowatch">
+      </div>
     </div>
     <div>
       <button class="btn-save" onclick="saveConfig()">💾 設定を保存</button>
@@ -302,8 +315,22 @@ input:checked+.slider:before{transform:translateX(17px)}
 <script>
 const socket = io();
 let commentCount = 0, firstComment = true;
-const listenerData = {}; // ukey -> {name, path, comments:[{time,text,live_id}], items:{name->count}}
+const listenerData = {}; // ukey -> {name, path, streamer, comments:[{time,text,live_id}], items:{name->count}}
 let activeListener = null;
+let totalListeners = 0;
+
+function updateListenerStats() {
+  const now = new Date();
+  const recentKeys = Object.keys(listenerData).filter(k => {
+    const last = listenerData[k].comments.slice(-1)[0];
+    if (!last) return false;
+    const [h,m,s] = last.time.split(':').map(Number);
+    const t = new Date(); t.setHours(h,m,s,0);
+    return (now - t) < 5 * 60 * 1000;
+  });
+  document.getElementById('statListenersCurrent').textContent = recentKeys.length;
+  document.getElementById('statListenersTotal').textContent = totalListeners;
+}
 const allComments = {};
 let activeLid = 'all';
 
@@ -316,6 +343,13 @@ socket.on('status', data => {
   document.getElementById('statRecording').textContent  = data.recording.length;
 });
 socket.on('log', e => appendLog(e));
+
+// 視聴者数更新
+socket.on('viewer_count', d => {
+  // 全配信の合計を表示
+  document.getElementById('statListenersCurrent').textContent = d.view_count;
+  document.getElementById('statListenersTotal').textContent = d.total_view_count;
+});
 socket.on('comment', c => {
   if (firstComment) { document.getElementById('commentWrap').innerHTML=''; firstComment=false; }
   commentCount++;
@@ -340,6 +374,7 @@ socket.on('comment', c => {
   if (!listenerData[ukey]) {
     listenerData[ukey] = {name:c.user, path:c.user_path||'', streamer:c.streamer||'', comments:[], items:{}};
     addListenerTab(ukey);
+    totalListeners++;
   }
   listenerData[ukey].comments.push({time:c.time, text:c.text, live_id:String(c.live_id||'')});
   // アイテム集計（🎁アイテム名×個数 形式を解析）
@@ -355,6 +390,7 @@ socket.on('comment', c => {
     }
   }
   updateListenerTab(ukey);
+  updateListenerStats();
   if (activeListener === ukey) appendListenerCmt({time:c.time, text:c.text});
   const lid = String(c.live_id || 'unknown');
   if (!allComments[lid]) { allComments[lid]=[]; addTab(lid); }
@@ -407,11 +443,8 @@ function openProfile(userPath) {
 // ── 配信プレイヤー ──
 let currentLiveId = null;
 function openPlayer(liveId, userPath) {
-  currentLiveId = liveId;
-  document.getElementById('playerTitle').textContent = `📺 ${userPath} (live_id: ${liveId})`;
-  // ふわっちの配信ページをiframeで表示
-  document.getElementById('playerFrame').src = `https://whowatch.tv/viewer/${liveId}`;
-  document.getElementById('playerModal').classList.add('open');
+  // ふわっちはiframe埋め込み禁止なので新しいタブで開く
+  window.open(`https://whowatch.tv/viewer/${liveId}`, '_blank');
 }
 function closePlayer() {
   document.getElementById('playerModal').classList.remove('open');
@@ -489,6 +522,10 @@ function renderConfig(cfg) {
   const es = cfg.embed_subtitles ?? false;
   document.getElementById('cfgEmbedSub').checked = es;
   document.getElementById('cfgEmbedSubLabel').textContent = es ? 'ON' : 'OFF';
+  const mu = cfg.mega_upload ?? false;
+  document.getElementById('cfgMegaUpload').checked = mu;
+  document.getElementById('cfgMegaUploadLabel').textContent = mu ? 'ON' : 'OFF';
+  document.getElementById('cfgMegaFolder').value = cfg.mega_folder || '/whowatch';
 }
 document.getElementById('cfgComments').addEventListener('change',function(){
   document.getElementById('cfgCommentsLabel').textContent = this.checked?'ON':'OFF';
@@ -519,7 +556,9 @@ async function saveConfig(){
     quality:        document.getElementById('cfgQuality').value,
     output_dir:     document.getElementById('cfgOutputDir').value,
     save_comments:  document.getElementById('cfgComments').checked,
-    embed_subtitles:document.getElementById('cfgEmbedSub').checked,
+    embed_subtitles:    document.getElementById('cfgEmbedSub').checked,
+    mega_upload:        document.getElementById('cfgMegaUpload').checked,
+    mega_folder:        document.getElementById('cfgMegaFolder').value || '/whowatch',
   };
   const res=await post('/api/config/save',cfg);
   if(res.ok){
@@ -724,6 +763,9 @@ function isNgComment(text) {
 function clearListeners() {
   Object.keys(listenerData).forEach(k=>delete listenerData[k]);
   activeListener = null;
+  totalListeners = 0;
+  document.getElementById('statListenersCurrent').textContent = 0;
+  document.getElementById('statListenersTotal').textContent = 0;
   const tabs = document.getElementById('listener-tabs');
   tabs.innerHTML = '<span style="color:var(--muted);font-size:10px">コメント待機中...</span>';
   document.getElementById('listenerWrap').innerHTML = '<div class="empty">リスナーを選択してください</div>';
