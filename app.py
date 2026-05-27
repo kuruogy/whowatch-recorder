@@ -85,6 +85,46 @@ def build_status():
         "config": cfg,
     }
 
+
+# 視聴者数を定期取得してフロントに送るスレッド
+_viewer_counts: dict = {}  # live_id -> {view_count, total_view_count}
+
+def _fetch_viewer_counts():
+    """録画中の配信の視聴者数を定期取得する。"""
+    import time as _t
+    while True:
+        try:
+            with _lock:
+                sessions = dict(recording_sessions)
+            for up, s in sessions.items():
+                live_id = s.get("live_id", "")
+                if not live_id:
+                    continue
+                try:
+                    ts = int(_t.time() * 1000)
+                    r = requests.get(f"{API_BASE}/lives/{live_id}?last_updated_at={ts}",
+                                     headers=get_headers(), timeout=8)
+                    if r.status_code == 200:
+                        d = r.json()
+                        live = d.get("live", {})
+                        _viewer_counts[live_id] = {
+                            "view_count": live.get("view_count", 0),
+                            "total_view_count": live.get("total_view_count", 0),
+                        }
+                        sio.emit("viewer_count", {
+                            "live_id": live_id,
+                            "user_path": up,
+                            "view_count": live.get("view_count", 0),
+                            "total_view_count": live.get("total_view_count", 0),
+                        })
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        _t.sleep(30)
+
+threading.Thread(target=_fetch_viewer_counts, daemon=True).start()
+
 # ─── 設定 ────────────────────────────────────────────────
 
 def load_config() -> dict:
