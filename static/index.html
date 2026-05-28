@@ -64,6 +64,10 @@ main{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
 /* 配信パネル */
 .live-panel{display:none}
 .live-panel.active{display:flex;flex-direction:column;gap:10px}
+.live-panel-body{display:flex;flex-direction:column;gap:10px;overflow:hidden;transition:.3s}
+.live-panel-body.collapsed{display:none}
+.collapse-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 4px}
+.collapse-btn:hover{color:var(--text)}
 
 /* 配信ヘッダー */
 .live-header{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;gap:10px}
@@ -243,7 +247,15 @@ input:checked+.slider:before{transform:translateX(16px)}
         </div>
       </div>
       <div class="form-group">
-        <label>字幕埋め込み <span style="font-size:9px;color:var(--muted)">(録画後MP4生成)</span></label>
+        <label>保存形式</label>
+        <select id="cfgSaveFormat">
+          <option value="mp4">MP4（字幕付き・TS削除）</option>
+          <option value="ts">TS（録画そのまま）</option>
+          <option value="both">両方保存</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>字幕埋め込み <span style="font-size:9px;color:var(--muted)">(MP4保存時に有効)</span></label>
         <div class="toggle-row">
           <label class="toggle"><input type="checkbox" id="cfgEmbedSub" checked><span class="slider"></span></label>
           <span id="cfgEmbedSubLabel">ON</span>
@@ -321,13 +333,21 @@ socket.on('comment', c => {
   } else {
     listenerData[ukey].comments.push({time:c.time, text:c.text, live_id:lid});
     // アイテム集計
-    const itemRegex = /🎁([^🎁×\s][^🎁×]*)(?:×(\d+))?/g;
-    let im;
-    while ((im = itemRegex.exec(c.text)) !== null) {
-      const iname = im[1].trim();
-      const icount = im[2] ? parseInt(im[2]) : 1;
-      if (iname) listenerData[ukey].items[iname] = (listenerData[ukey].items[iname]||0) + icount;
-    }
+    // アイテム集計: 🎁アイテム名×個数 の形式をすべて抽出
+    // 例: "🎁ワンちゃんさん×100" → {name:"ワンちゃんさん", count:100}
+    const itemParts = c.text.split('🎁').slice(1);
+    itemParts.forEach(part => {
+      const mcount = part.match(/^(.+?)×(\d+)/);
+      if (mcount) {
+        const iname = mcount[1].trim();
+        const icount = parseInt(mcount[2]);
+        if (iname && icount > 0) listenerData[ukey].items[iname] = (listenerData[ukey].items[iname]||0) + icount;
+      } else {
+        // ×なし → 1個
+        const iname = part.trim().replace(/\s.*$/, '');
+        if (iname) listenerData[ukey].items[iname] = (listenerData[ukey].items[iname]||0) + 1;
+      }
+    });
   }
   updateListenerTab(ukey);
   updateListenerStats();
@@ -355,11 +375,26 @@ function updateLiveTabs(recording) {
   const tabs   = document.getElementById('liveTabs');
   const panels = document.getElementById('livePanels');
 
-  // 録画終了したパネルを削除
+  // 録画終了したパネルを折りたたみ＋グレーアウト（削除はしない）
   Object.keys(currentLivePanels).forEach(up => {
     if (!recording.find(r => r.user_path === up)) {
-      document.getElementById(`tab-${CSS.escape(up)}`)?.remove();
-      document.getElementById(`panel-${CSS.escape(up)}`)?.remove();
+      const tab = document.getElementById(`tab-${up}`);
+      const body = document.getElementById(`body-${up}`);
+      const btn = document.getElementById(`collapse-${up}`);
+      if (tab && !tab.dataset.ended) {
+        tab.dataset.ended = '1';
+        tab.style.opacity = '0.5';
+        tab.style.borderColor = 'var(--muted)';
+        // 録画中ドットを停止に変更
+        const dot = tab.querySelector('.tab-dot');
+        if (dot) { dot.style.background='var(--muted)'; dot.style.animation='none'; dot.style.boxShadow='none'; }
+        tab.title = '録画終了（クリックで表示）';
+        // 自動折りたたみ
+        if (body && !body.classList.contains('collapsed')) {
+          body.classList.add('collapsed');
+          if (btn) btn.textContent = '▶';
+        }
+      }
       delete currentLivePanels[up];
     }
   });
@@ -407,11 +442,13 @@ function updateLiveTabs(recording) {
           <div style="font-size:9px;color:var(--muted);margin-top:2px">視聴者</div>
         </div>
         <div class="live-header-btns">
-          <button class="btn-xs primary" onclick="window.open('https://whowatch.tv/viewer/${r.live_id}','_blank')">📺 視聴</button>
-          <button class="btn-xs stop" onclick="stopRec('${esc(r.user_path)}')">⏹ 停止</button>
+          <button class="collapse-btn" id="collapse-${r.user_path}" onclick="togglePanel('${esc(r.user_path)}')" title="折りたたむ">▼</button>
+          <button class="btn-xs primary" onclick="window.open('https://whowatch.tv/viewer/${r.live_id}','_blank')">📺</button>
+          <button class="btn-xs stop" onclick="stopRec('${esc(r.user_path)}')">⏹</button>
         </div>
       </div>
       <!-- コメント＋リスナー -->
+      <div class="live-panel-body" id="body-${r.user_path}">
       <div class="grid3">
         <!-- コメント -->
         <div class="card" style="grid-column:1/3">
@@ -458,6 +495,7 @@ function updateLiveTabs(recording) {
             <div class="empty">リスナーを選択してください</div>
           </div>
         </div>
+      </div>
       </div>`;
     panels.appendChild(panel);
   });
@@ -468,6 +506,14 @@ function switchLiveTab(up) {
   document.querySelectorAll('.live-panel').forEach(p => p.classList.remove('active'));
   document.getElementById(`tab-${up}`)?.classList.add('active');
   document.getElementById(`panel-${up}`)?.classList.add('active');
+}
+
+function togglePanel(up) {
+  const body = document.getElementById(`body-${up}`);
+  const btn  = document.getElementById(`collapse-${up}`);
+  if (!body) return;
+  const collapsed = body.classList.toggle('collapsed');
+  if (btn) btn.textContent = collapsed ? '▶' : '▼';
 }
 
 function updateViewerDisplay(lid, cur, tot) {
@@ -703,6 +749,7 @@ function renderConfig(cfg) {
   const sc=cfg.save_comments??true;
   document.getElementById('cfgComments').checked=sc;
   document.getElementById('cfgCommentsLabel').textContent=sc?'ON':'OFF';
+  document.getElementById('cfgSaveFormat').value = cfg.save_format || 'mp4';
   const es=cfg.embed_subtitles??true;
   document.getElementById('cfgEmbedSub').checked=es;
   document.getElementById('cfgEmbedSubLabel').textContent=es?'ON':'OFF';
@@ -739,6 +786,7 @@ async function saveConfig(){
     quality:         document.getElementById('cfgQuality').value,
     output_dir:      document.getElementById('cfgOutputDir').value,
     save_comments:   document.getElementById('cfgComments').checked,
+    save_format:     document.getElementById('cfgSaveFormat').value,
     embed_subtitles: document.getElementById('cfgEmbedSub').checked,
     whowatch_cookie: document.getElementById('cfgCookie').value,
     whowatch_device_id: document.getElementById('cfgDeviceId').value,
