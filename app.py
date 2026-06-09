@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
     "output_dir": str(OUTPUT_DIR),
     "save_comments": True,
     "embed_subtitles": True,
+    "save_format": "mp4",
 }
 
 API_BASE  = "https://api.whowatch.tv"
@@ -569,8 +570,9 @@ def do_record(user_path: str, live_id: str, play_url: str, jwt: str = "", ws_url
     _append_item_summary(comment_file)
 
     # コメントをSRTに変換して動画に埋め込む（字幕埋め込みが先）
+    save_format = cfg.get("save_format", "mp4")
     if cfg.get("embed_subtitles", False):
-        _embed_subtitles(video_file, comment_file, ffmpeg)
+        _embed_subtitles(video_file, comment_file, ffmpeg, delete_ts=(save_format == "mp4"))
 
     # MEGAへアップロード（字幕埋め込み後に実行）
     if cfg.get("mega_upload", False):
@@ -692,7 +694,7 @@ def _append_item_summary(comment_file: Path):
         pass  # 集計失敗は無視
 
 
-def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str):
+def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str, delete_ts: bool = True):
     """コメントtxtをSRTに変換して動画に字幕として埋め込む。"""
     import re as _re
     srt_file = video_file.with_suffix(".srt")
@@ -750,8 +752,9 @@ def _embed_subtitles(video_file: Path, comment_file: Path, ffmpeg_bin: str):
         # 中間ファイルのSRTを削除
         srt_file.unlink(missing_ok=True)
         push_log(f"字幕埋め込み完了: {out_file.name}", "info")
-        # TSファイルを削除
-        video_file.unlink(missing_ok=True)
+        # delete_tsフラグに従ってTSを削除
+        if delete_ts:
+            video_file.unlink(missing_ok=True)
     except Exception as e:
         push_log(f"字幕埋め込みエラー: {e}", "warn")
 
@@ -913,6 +916,8 @@ def api_config_save():
         cfg["save_comments"] = bool(data["save_comments"])
     if "output_dir" in data:
         cfg["output_dir"] = data["output_dir"]
+    if "save_format" in data:
+        cfg["save_format"] = str(data["save_format"])
     if "embed_subtitles" in data:
         cfg["embed_subtitles"] = bool(data["embed_subtitles"])
     if "whowatch_cookie" in data:
