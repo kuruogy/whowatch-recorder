@@ -325,7 +325,7 @@ socket.on('comment', c => {
   const ukey = c.user_path ? `${c.user_path}__${c.user}` : c.user;
   if (!listenerData[ukey]) {
     listenerData[ukey] = {name:c.user, path:c.user_path||'', streamer:c.streamer||'', comments:[], items:{}};
-    addListenerTab(ukey, lid);
+    addListenerTab(ukey, lid, c.streamer||'');
     totalListeners++;
   }
   if (isNG) {
@@ -406,7 +406,20 @@ function updateLiveTabs(recording) {
 
   // タブとパネルを追加
   recording.forEach(r => {
-    if (currentLivePanels[r.user_path]) return; // 既存
+    if (currentLivePanels[r.user_path]) {
+      // 既存パネルのlive_idが変わった場合（再録画）は更新
+      if (currentLivePanels[r.user_path] !== r.live_id) {
+        const panel = document.getElementById(`panel-${r.user_path}`);
+        if (panel) {
+          panel.dataset.lid = r.live_id;
+          // 新しいlive_idのコメントラップを追加
+          const oldWrap = panel.querySelector('.comment-wrap[id^="cmtWrap-"]');
+          if (oldWrap) oldWrap.id = `cmtWrap-${r.live_id}`;
+        }
+        currentLivePanels[r.user_path] = r.live_id;
+      }
+      return; // 既存
+    }
     currentLivePanels[r.user_path] = r.live_id;
     liveInfo[r.user_path] = r;
 
@@ -486,12 +499,12 @@ function updateLiveTabs(recording) {
               <button onclick="showItemSummary()" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 6px;color:var(--yellow);cursor:pointer;font-size:10px">🎁</button>
             </div>
           </div>
-          <input type="text" id="cmtSearch" placeholder="🔍 検索..." oninput="searchComments()"
+          <input type="text" id="cmtSearch-${r.user_path}" placeholder="🔍 検索..." oninput="searchComments(this)"
             style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 7px;color:var(--text);font-size:10px;outline:none;margin-bottom:5px">
-          <div class="listener-tabs" id="listener-tabs">
+          <div class="listener-tabs" id="listener-tabs-${r.user_path}">
             <span style="color:var(--muted);font-size:10px">コメント待機中...</span>
           </div>
-          <div class="comment-wrap" id="listenerWrap">
+          <div class="comment-wrap" id="listenerWrap-${r.user_path}">
             <div class="empty">リスナーを選択してください</div>
           </div>
         </div>
@@ -526,7 +539,16 @@ function updateViewerDisplay(lid, cur, tot) {
 }
 
 function appendCmtToPanel(lid, c) {
-  const wrap = document.getElementById(`cmtWrap-${lid}`);
+  // live_idでパネルを探す
+  let wrap = document.getElementById(`cmtWrap-${lid}`);
+  // 見つからない場合はstreamer(user_path)から現在アクティブなパネルを探す
+  if (!wrap && c.streamer) {
+    const panel = document.getElementById(`panel-${c.streamer}`);
+    if (panel) {
+      const activeLid = panel.dataset.lid;
+      wrap = document.getElementById(`cmtWrap-${activeLid}`);
+    }
+  }
   if (!wrap) return;
   // 「コメント待機中...」を削除
   const empty = wrap.querySelector('.empty');
@@ -557,12 +579,21 @@ function clearPanelComments(up) {
 }
 
 // ── リスナー管理 ──
-function addListenerTab(ukey, lid) {
-  const tabs = document.getElementById('listener-tabs');
+function addListenerTab(ukey, lid, streamer) {
+  // streamerのパネル内のlistener-tabsを使う
+  let tabs = null;
+  if (streamer) {
+    const panel = document.getElementById(`panel-${streamer}`);
+    if (panel) tabs = panel.querySelector(`#listener-tabs-${streamer}`) || panel.querySelector('.listener-tabs');
+  }
+  if (!tabs) {
+    const activePanel = document.querySelector('.live-panel.active');
+    if (activePanel) tabs = activePanel.querySelector('.listener-tabs');
+  }
   if (!tabs) return;
   const empty = tabs.querySelector('span');
   if (empty) empty.remove();
-  if (tabs.querySelector(`[data-ukey="${ukey}"]`)) return;
+  if (tabs.querySelector(`[data-ukey="${CSS.escape(ukey)}"]`)) return;
   const btn = document.createElement('button');
   btn.className = 'tab-btn';
   btn.dataset.ukey = ukey;
@@ -572,8 +603,8 @@ function addListenerTab(ukey, lid) {
 }
 
 function updateListenerTab(ukey) {
-  const btn = document.querySelector(`[data-ukey="${ukey}"]`);
-  if (btn) updateListenerTabLabel(btn, ukey);
+  // 全パネルのタブを更新
+  document.querySelectorAll(`[data-ukey="${ukey}"]`).forEach(btn => updateListenerTabLabel(btn, ukey));
 }
 
 function updateListenerTabLabel(btn, ukey) {
@@ -583,10 +614,13 @@ function updateListenerTabLabel(btn, ukey) {
 }
 
 function switchListenerTab(btn, ukey) {
-  document.querySelectorAll('#listener-tabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  // ボタンの親パネル内のタブとwrapを操作
+  const panel = btn.closest('.live-panel');
+  const tabsEl = panel ? panel.querySelector('.listener-tabs') : document.querySelector('.listener-tabs');
+  const wrap = panel ? panel.querySelector('[id^="listenerWrap-"]') : document.querySelector('[id^="listenerWrap-"]');
+  if (tabsEl) tabsEl.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   activeListener = ukey;
-  const wrap = document.getElementById('listenerWrap');
   if (!wrap) return;
   wrap.innerHTML = '';
   const d = listenerData[ukey];
@@ -603,7 +637,18 @@ function switchListenerTab(btn, ukey) {
 }
 
 function appendListenerCmt(c) {
-  const wrap = document.getElementById('listenerWrap');
+  let wrap = null;
+  if (activeListenerPanel) {
+    wrap = activeListenerPanel.querySelector('[id^="listenerWrap-"]');
+  }
+  if (!wrap) {
+  const activeBtn = document.querySelector('.listener-tabs .tab-btn.active');
+  if (activeBtn) {
+    const panel = activeBtn.closest('.live-panel');
+    wrap = panel ? panel.querySelector('[id^="listenerWrap-"]') : null;
+  }
+  if (!wrap) wrap = document.querySelector('[id^="listenerWrap-"]');
+  }
   if (!wrap) return;
   const el = document.createElement('div');
   el.className = 'cmt-item';
@@ -614,8 +659,11 @@ function appendListenerCmt(c) {
   wrap.scrollTop = wrap.scrollHeight;
 }
 
-function searchComments() {
-  if (activeListener) switchListenerTab(document.querySelector(`[data-ukey="${activeListener}"]`), activeListener);
+function searchComments(inputEl) {
+  if (activeListener && activeListenerPanel) {
+    const btn = activeListenerPanel.querySelector(`[data-ukey="${CSS.escape(activeListener)}"]`);
+    if (btn) switchListenerTab(btn, activeListener);
+  }
 }
 
 function sortListenerTabs() {
