@@ -293,6 +293,7 @@ const listenerData   = {};   // ukey -> {name,path,streamer,comments,items}
 const viewerCounts   = {};   // live_id -> {view_count, total_view_count}
 const liveInfo       = {};   // user_path -> {live_id, start_time, video_file}
 let   activeListener = null;
+let   activeListenerPanel = null;
 let   totalListeners = 0;
 
 // NGワード
@@ -584,7 +585,7 @@ function addListenerTab(ukey, lid, streamer) {
   let tabs = null;
   if (streamer) {
     const panel = document.getElementById(`panel-${streamer}`);
-    if (panel) tabs = panel.querySelector(`#listener-tabs-${streamer}`) || panel.querySelector('.listener-tabs');
+    if (panel) tabs = panel.querySelector(`#${CSS.escape('listener-tabs-'+streamer)}`) || panel.querySelector('.listener-tabs');
   }
   if (!tabs) {
     const activePanel = document.querySelector('.live-panel.active');
