@@ -872,6 +872,41 @@ function toast(msg,type){const e=document.getElementById('toast');e.textContent=
   document.getElementById('statRecording').textContent=data.recording.length;
   const logs=await fetch('/api/logs').then(r=>r.json());
   logs.forEach(e=>appendLog(e));
+  // コメント履歴を再生
+  try {
+    const history = await fetch('/api/comments/history').then(r=>r.json());
+    history.forEach(c => {
+      commentCount++;
+      const lid = String(c.live_id || 'unknown');
+      if (!allComments[lid]) allComments[lid] = [];
+      allComments[lid].push(c);
+      const isNG = isNgComment(c.text);
+      const ukey = c.user_path ? `${c.user_path}__${c.user}` : c.user;
+      if (!listenerData[ukey]) {
+        listenerData[ukey] = {name:c.user, path:c.user_path||'', streamer:c.streamer||'', comments:[], items:{}};
+        addListenerTab(ukey, lid, c.streamer||'');
+        totalListeners++;
+      }
+      if (isNG) {
+        listenerData[ukey].comments.push({time:c.time, text:`🚫[NG] ${c.text}`, live_id:lid});
+      } else {
+        listenerData[ukey].comments.push({time:c.time, text:c.text, live_id:lid});
+        const itemParts = c.text.split('🎁').slice(1);
+        itemParts.forEach(part => {
+          const mcount = part.match(/^(.+?)×(\d+)/);
+          if (mcount) {
+            const iname = mcount[1].trim();
+            const icount = parseInt(mcount[2]);
+            if (iname && icount > 0) listenerData[ukey].items[iname] = (listenerData[ukey].items[iname]||0) + icount;
+          }
+        });
+      }
+      if (!isNG) appendCmtToPanel(lid, c);
+      updateListenerTab(ukey);
+    });
+    document.getElementById('statComments').textContent = commentCount;
+    updateListenerStats();
+  } catch(e) { console.log('履歴取得エラー:', e); }
 })();
 </script>
 </body>
