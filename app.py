@@ -419,14 +419,19 @@ async def collect_comments(live_id: str, comment_file: Path, stop_event: asyncio
                                 push_log(f"💬 [{user}] {display}", "comment")
                                 # 匿名ユーザーはcomment.idで区別できないので
                                 # user_nameとuser_pathの組み合わせをキーにする
-                                sio.emit("comment", {
+                                cmt_data = {
                                     "time": ts, "user": user, "text": display,
                                     "live_id": live_id,
                                     "user_id": user_obj.get("id", ""),
                                     "user_path": user_obj.get("user_path", ""),
                                     "comment_id": str(comment_obj.get("id", "")),
                                     "streamer": streamer,
-                                })
+                                }
+                                sio.emit("comment", cmt_data)
+                                # 履歴に追加
+                                comment_history.append(cmt_data)
+                                if len(comment_history) > MAX_COMMENT_HISTORY:
+                                    comment_history.pop(0)
                     except (json.JSONDecodeError, ValueError):
                         pass
 
@@ -965,6 +970,12 @@ def api_open_folder():
     else:
         subprocess.Popen(["xdg-open", str(folder)])
     return jsonify({"ok": True})
+
+@app.route("/api/comments/history")
+def api_comment_history():
+    """ブラウザリロード時にコメント履歴を返す。"""
+    return jsonify(comment_history)
+
 
 @app.route("/api/logs")
 def api_logs():
